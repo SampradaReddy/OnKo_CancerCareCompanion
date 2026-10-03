@@ -173,11 +173,33 @@ def test_signature_check_can_be_switched_off_for_local_debugging(monkeypatch):
     assert c.post("/whatsapp/webhook", data={"From": phone(), "Body": "hi"}).status_code == 200
 
 
-def test_sos_reply_mentions_caregiver_and_alerts_once(capsys):
+@pytest.fixture
+def twilio_accepts(monkeypatch):
+    """Pretend Twilio accepted every outgoing message; returns the list of (to, body) sent."""
+    sent = []
+
+    def fake_send_detail(to, body):
+        sent.append((to, body))
+        return True, None
+    monkeypatch.setattr(messages, "send_detail", fake_send_detail)
+    return sent
+
+
+def _alerts(sent):
+    return [b for _, b in sent if b.startswith("OnKo alert: Rajesh Kumar")]
+
+
+def test_sos_reply_mentions_caregiver_and_alerts_once(twilio_accepts):
     reply = wa("SOS")
-    assert "केयरगिवर" in reply                         # Hindi "caregiver": they really were alerted
+    assert "केयरगिवर" in reply                         # Twilio accepted the caregiver alert
     wa("SOS")                                          # second press within 60 s
-    assert capsys.readouterr().out.count("OnKo alert: Rajesh Kumar") == 1
+    assert len(_alerts(twilio_accepts)) == 1
+
+
+def test_sos_reply_does_not_claim_caregiver_when_alert_not_accepted():
+    reply = wa("SOS")                                  # tests run without Twilio: the alert is not accepted
+    assert "108" in reply and "केयरगिवर" not in reply
+    assert c.get("/attention").json()[0]["label"] == "SOS"
 
 
 def test_production_logs_hide_patient_text(monkeypatch, capsys):
@@ -196,20 +218,20 @@ def test_daily_job_sends_one_checklist_per_eligible_patient():
     assert len(sent_logs) == 1
 
 
-def test_transfer_of_care_sos_still_alerts_caregiver(capsys):
+def test_transfer_of_care_sos_still_alerts_caregiver(twilio_accepts):
     c.patch("/patients/p_rajesh/journey-state", json={"state": "TRANSFER_OF_CARE", "reason": "test"})
     reply = wa("SOS")
     assert "केयरगिवर" in reply
-    assert "OnKo alert: Rajesh Kumar" in capsys.readouterr().out
+    assert len(_alerts(twilio_accepts)) == 1
     assert c.get("/attention").json()[0]["label"] == "SOS"
 
 
-def test_sos_dedupe_resets_after_demo_reset(capsys):
+def test_sos_dedupe_resets_after_demo_reset(twilio_accepts):
     wa("SOS")
     c.post("/demo/reset")
     reply = wa("SOS")
     assert "केयरगिवर" in reply
-    assert capsys.readouterr().out.count("OnKo alert: Rajesh Kumar") == 2
+    assert len(_alerts(twilio_accepts)) == 2
 
 
 def test_send_checklist_requires_demo_access_code_when_set(monkeypatch):
