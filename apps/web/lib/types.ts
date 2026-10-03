@@ -26,6 +26,11 @@ export interface CarePlanItem {
   start_date: string; end_date: string | null; recurrence: string | null; approved_by: string; approved_at: string;
 }
 
+export type CarePlanItemPatch = Partial<Pick<CarePlanItem, "type" | "title" | "details" | "start_date" | "end_date" | "recurrence">>;
+export interface CarePlanDeleteResult {
+  id: string; patient_id: string; removed: boolean; future_events_removed: number; historical_events_preserved: number;
+}
+
 export interface CopilotItem {
   type: EventType; title: string; details: Record<string, string>; start_date: string;
   end_date: string | null; recurrence: string | null; source_span: string;
@@ -65,6 +70,7 @@ export interface MinimizedCareEvent {
 }
 
 export interface CaregiverView {
+  caregiver: Caregiver;
   patient: {
     id: string; name: string; journey_state: JourneyState; preferred_language: string;
   };
@@ -78,7 +84,9 @@ export interface ReviewSummary { ok: boolean; since: string | null; bullets: str
 
 export interface Patient360 {
   patient: Patient; care_plan: CarePlanItem[]; timeline: CareEvent[]; open_queries: PatientQuery[];
-  reports: Report[]; caregivers: Caregiver[]; attention: AttentionItem[]; since_last_review: ReviewSummary;
+  query_history?: PatientQuery[];
+  reports: Report[]; caregivers: Caregiver[]; attention: AttentionItem[]; attention_history?: AttentionItem[];
+  since_last_review: ReviewSummary;
 }
 
 export interface DailyChecklist {

@@ -2,8 +2,8 @@
 // forward the session access-code cookie to FastAPI.
 import type {
   Patient, AttentionItem, DashboardOverview, Patient360, DailyChecklist, CarePlanDraft,
-  CarePlanItem, CopilotItem, CareEvent, EventStatus, PatientQuery, Role, CaregiverView,
-  Caregiver, Report,
+CarePlanItem, CarePlanItemPatch, CarePlanDeleteResult, CopilotItem, CareEvent,
+EventStatus, PatientQuery, Role, CaregiverView, Caregiver, Report,
 } from "./types";
 import patientsMock from "@/mocks/patients.json";
 import attentionMock from "@/mocks/attention.json";
@@ -17,6 +17,50 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 export type ActorRef = { role: Role; userId: string };
+
+export type EnrollmentPayload = {
+  name: string;
+  age: number;
+  gender: string;
+  preferred_language: string;
+  phone: string;
+  abha_id?: string | null;
+  diagnosis_label: string;
+  regimen_label: string;
+  cycle_current: number;
+  cycle_total: number;
+};
+
+export type EnrollmentResult = {
+  patient: Patient;
+  login_id: string;
+  whatsapp_sent: boolean;
+  warning?: string;
+  demo_password?: string;
+};
+
+export type CaregiverInviteResult = {
+  caregiver: Caregiver;
+  login_id: string;
+  whatsapp_sent: boolean;
+  warning?: string;
+  password?: string;
+  demo_password?: string;
+};
+
+export type CaregiverLoginResult = {
+  ok: boolean;
+  caregiver_id: string;
+  name: string;
+  patient_id: string;
+};
+
+export type PatientLoginResult = {
+  ok: boolean;
+  patient_id: string;
+  name: string;
+  must_change: boolean;
+};
 
 let role: Role = "doctor";
 let userId = "doc_mehta";
@@ -101,6 +145,16 @@ export const api = {
   caregiverView: (id: string) =>
     USE_MOCKS
       ? mock<CaregiverView>({
+          caregiver: {
+            id: "cg_sunita",
+            patient_id: "p_rajesh",
+            name: "Sunita Kumar",
+            relation: "Wife",
+            phone_whatsapp: "",
+            type: "family",
+            consent_status: "GRANTED",
+            permissions: { view_journey: true, upload_reports: true, receive_escalations: true },
+          },
           patient: {
             id: "p_rajesh",
             name: "Rajesh Kumar",
@@ -116,6 +170,36 @@ export const api = {
 
   carePlan: (id: string) =>
     USE_MOCKS ? mock<CarePlanItem[]>((p360Mock as unknown as Patient360).care_plan) : req<CarePlanItem[]>(`/patients/${id}/careplan`),
+
+  updateCarePlanItem: (id: string, patch: CarePlanItemPatch) =>
+  USE_MOCKS
+    ? mock<CarePlanItem>({
+        ...((p360Mock as unknown as Patient360).care_plan.find(
+          x => x.id === id
+        ) as CarePlanItem),
+        ...patch,
+      })
+    : req<CarePlanItem>(
+        `/careplan/items/${id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        }
+      ),
+
+deleteCarePlanItem: (id: string) =>
+  USE_MOCKS
+    ? mock<CarePlanDeleteResult>({
+        id,
+        patient_id: "",
+        removed: true,
+        future_events_removed: 0,
+        historical_events_preserved: 0,
+      })
+    : req<CarePlanDeleteResult>(
+        `/careplan/items/${id}`,
+        { method: "DELETE" }
+      ),
 
   createDraft: (patient_id: string, raw_text: string) =>
     USE_MOCKS ? mock<CarePlanDraft>(draftMock)
@@ -149,6 +233,70 @@ export const api = {
   sendQuery: (patient_id: string, text: string, actor?: ActorRef) =>
     USE_MOCKS ? mock<PatientQuery>({})
       : req<PatientQuery>("/queries", { method: "POST", body: JSON.stringify({ patient_id, text, channel: "app" }) }, actor),
+
+  updateQuery: (
+  id: string,
+  status: string,
+  response?: string
+) =>
+  USE_MOCKS
+    ? mock<PatientQuery>({
+        id,
+        status,
+        response,
+      } as PatientQuery)
+    : req<PatientQuery>(
+        `/queries/${id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            status,
+            response: response || null,
+          }),
+        }
+      ),
+
+  sendEnrollmentOtp: (phone: string) =>
+    req<{ sent: boolean; expires_in_minutes: number; phone: string; demo_otp?: string }>(
+      "/patients/enrollment/send-otp",
+      { method: "POST", body: JSON.stringify({ phone }) },
+      { role: "doctor", userId: "doc_mehta" },
+    ),
+
+  verifyEnrollmentOtp: (phone: string, otp: string) =>
+    req<{ verified: boolean; phone: string }>(
+      "/patients/enrollment/verify-otp",
+      { method: "POST", body: JSON.stringify({ phone, otp }) },
+      { role: "doctor", userId: "doc_mehta" },
+    ),
+
+  enrollPatient: (payload: EnrollmentPayload) =>
+    req<EnrollmentResult>(
+      "/patients/enroll",
+      { method: "POST", body: JSON.stringify(payload) },
+      { role: "doctor", userId: "doc_mehta" },
+    ),
+
+  patientLogin: (patient_id: string, password: string) =>
+    req<PatientLoginResult>(
+      "/patient-auth/login",
+      { method: "POST", body: JSON.stringify({ patient_id, password }) },
+      { role: "patient", userId: patient_id || "patient_login" },
+    ),
+
+  addCaregiver: (patient_id: string, payload: {name:string; relation:string; phone_whatsapp:string; type?:string}) =>
+    req<CaregiverInviteResult>(
+      `/patients/${patient_id}/caregivers`,
+      { method: "POST", body: JSON.stringify(payload) },
+      { role: "patient", userId: patient_id },
+    ),
+
+  caregiverLogin: (caregiver_id: string, password: string) =>
+    req<CaregiverLoginResult>(
+      "/caregiver-auth/login",
+      { method: "POST", body: JSON.stringify({ caregiver_id, password }) },
+      { role: "caregiver", userId: caregiver_id || "caregiver_login" },
+    ),
 
   acceptCaregiver: (id: string) =>
     req<Caregiver>(`/caregivers/${id}/accept`, { method: "POST" }, { role: "caregiver", userId: id }),

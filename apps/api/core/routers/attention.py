@@ -8,6 +8,7 @@ from core.serialize import to_dict
 from core.services import audit
 from core.timeutil import utcnow
 
+
 router = APIRouter(tags=["attention"])
 ORDER = {"SOS": 0, "NEEDS_REVIEW": 1, "QUERY": 2, "FOLLOW_UP": 3}
 
@@ -32,7 +33,11 @@ def list_attention(assigned_to: str | None = None, label: str | None = None, pat
     if status is not None and status not in STATUSES:
         raise HTTPException(400, f"Unknown status; use one of {sorted(STATUSES)}")
     q = db.query(AttentionItem)
-    q = q.filter(AttentionItem.status == status) if status else q.filter(AttentionItem.status != "CLOSED")
+    q = (
+        q.filter(AttentionItem.status == status)
+        if status
+        else q.filter(AttentionItem.status.in_(["PENDING", "ACKNOWLEDGED"]))
+    )
     if assigned_to is not None:
         q = q.filter(AttentionItem.assigned_to == assigned_to)
     if label is not None:
@@ -46,8 +51,10 @@ def list_attention(assigned_to: str | None = None, label: str | None = None, pat
 def my_attention(db=Depends(get_db), actor=Depends(get_actor)):
     """Open items assigned to the caller (CLOSED left out, like the main queue)."""
     require(actor, *STAFF)
-    return _queue(db.query(AttentionItem).filter(AttentionItem.assigned_to == actor.user_id,
-                                                 AttentionItem.status != "CLOSED"))
+    return _queue(db.query(AttentionItem).filter(
+        AttentionItem.assigned_to == actor.user_id,
+        AttentionItem.status.in_(["PENDING", "ACKNOWLEDGED"])
+    ))
 
 
 class AttentionUpdate(BaseModel):
@@ -96,5 +103,8 @@ def overview(db=Depends(get_db), actor=Depends(get_actor)):
         "missed_activities": db.query(CareEvent).filter(CareEvent.status.in_(["REPORTED_MISSED", "NO_RESPONSE"])).count(),
         "open_queries": db.query(PatientQuery).filter(PatientQuery.status != "RESOLVED").count(),
         "reports_pending_review": db.query(Report).filter_by(reviewed=False).count(),
-        "sos_open": db.query(AttentionItem).filter_by(label="SOS").filter(AttentionItem.status != "CLOSED").count(),
+        "sos_open": db.query(AttentionItem)
+            .filter_by(label="SOS")
+            .filter(AttentionItem.status.in_(["PENDING", "ACKNOWLEDGED"]))
+            .count(),
     }
